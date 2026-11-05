@@ -163,7 +163,7 @@ def _forward_backward(log_em, trans, start):
 
 
 def fit(symbols_by_run, names, n_symbols, alpha=0.25, iterations=15, verbose=True,
-        learn_transitions=False):
+        learn_transitions=False, possession_s=MEAN_POSSESSION_S):
     """EM on one or several independent runs (the two halves). Returns (tables, trans).
 
     Emission tables are learned (H/A tied by mirror symmetry). Transitions stay at the declared
@@ -171,7 +171,7 @@ def fit(symbols_by_run, names, n_symbols, alpha=0.25, iterations=15, verbose=Tru
     """
     tables = {n: _tie_missing(t, n) for n, t in _initial_tables(
         {n: n_symbols[n] for n in names}).items()}
-    trans = initial_transitions()
+    trans = initial_transitions(possession_s=possession_s)
     start = np.array([0.0, 0.0, 1.0]) + 1e-3    # play begins from a kickoff, i.e. a dead ball
     start /= start.sum()
 
@@ -219,7 +219,7 @@ def viterbi(symbols, tables, trans, names, alpha=0.25):
 
 
 def decode_match(channels, runs, names, n_symbols, alpha=0.25, iterations=15, verbose=True,
-                 learn_transitions=False):
+                 learn_transitions=False, possession_s=MEAN_POSSESSION_S):
     """Fit on the graded halves, decode each. Returns (codes over all frames, tables, trans).
 
     Ungraded frames get X: they are never scored, and the halves are decoded independently so the
@@ -227,7 +227,7 @@ def decode_match(channels, runs, names, n_symbols, alpha=0.25, iterations=15, ve
     """
     symbols_by_run = [channels[start:stop] for start, stop in runs]
     tables, trans = fit(symbols_by_run, names, n_symbols, alpha, iterations, verbose,
-                        learn_transitions)
+                        learn_transitions, possession_s)
     codes = np.full(channels.shape[0], 3, dtype=np.int8)
     for (start, stop), symbols in zip(runs, symbols_by_run):
         codes[start:stop] = viterbi(symbols, tables, trans, names, alpha)

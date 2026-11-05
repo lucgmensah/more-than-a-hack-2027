@@ -234,7 +234,8 @@ def phase_team_channel(tracking, events=None, trust=0.6):
 
 def build_channels(tracking, names, events=None):
     """(N, len(names)) int symbol matrix for the requested channels, in the given order."""
-    events = events if events is not None else smart_tags()
+    # `events` stays None for matches without Smart Tagging; only the two tag channels read it, and
+    # they load the BAR-ATH tagging themselves when asked for with events=None.
     builders = {
         "nearest": lambda: nearest_channel(tracking),
         "ball_speed": lambda: ball_speed_channel(tracking),

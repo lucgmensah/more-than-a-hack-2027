@@ -1,8 +1,8 @@
 """Run the experiment ladder and print an indicative score table.
 
-    python experiments/run_experiments.py                 # E0..E5 at the declared alpha
-    python experiments/run_experiments.py --sweep         # + alpha sensitivity for the full model
-    python experiments/run_experiments.py --bootstrap 500 # confidence intervals on the public window
+    python experiments/exp01_hmm_unsupervised/run.py                 # E0..E5 at the declared alpha
+    python experiments/exp01_hmm_unsupervised/run.py --sweep         # + alpha sensitivity for the full model
+    python experiments/exp01_hmm_unsupervised/run.py --bootstrap 500 # confidence intervals on the public window
 
 Ladder (each row adds one evidence channel to the previous one):
 
@@ -25,7 +25,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
 import common  # noqa: E402
 import features  # noqa: E402
 import hmm  # noqa: E402
@@ -132,7 +132,7 @@ def main():
         results[name] = codes
         print(row(name, result), flush=True)
         if args.write:
-            common.write_submission(os.path.join(common.OUT_DIR, name + ".csv"), codes)
+            common.write_submission(os.path.join(common.OUT_DIR, "exp01", name + ".csv"), codes)
 
     if args.sweep:
         print("\nalpha sensitivity (E5). Not a selection: the declared alpha is {}.".format(

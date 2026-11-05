@@ -1,4 +1,4 @@
-"""Shared plumbing for the experiments: load the tracking once, build features, score a file.
+"""Shared library for the experiments (each experiment lives in its own folder and imports this): load the tracking once, build features, score a file.
 
 Everything here is numpy/pandas only, like the rest of the repository.
 
@@ -15,8 +15,9 @@ import sys
 
 import numpy as np
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+HERE = os.path.dirname(os.path.abspath(__file__))          # experiments/lib
+EXPERIMENTS = os.path.dirname(HERE)                         # experiments/
+ROOT = os.path.dirname(EXPERIMENTS)                         # repository root
 for _path in (ROOT, os.path.join(ROOT, "evaluation"), os.path.join(ROOT, "starter")):
     if _path not in sys.path:
         sys.path.insert(0, _path)
@@ -24,8 +25,8 @@ for _path in (ROOT, os.path.join(ROOT, "evaluation"), os.path.join(ROOT, "starte
 import possession_metrics as pm  # noqa: E402
 from games import GAME, GAMES, half_video_blocks, require, source_frames  # noqa: E402
 
-CACHE_DIR = os.path.join(HERE, "cache")
-OUT_DIR = os.path.join(HERE, "out")
+CACHE_DIR = os.path.join(EXPERIMENTS, "cache")
+OUT_DIR = os.path.join(EXPERIMENTS, "out")   # one sub-folder per experiment
 GT_PUBLIC = os.path.join(ROOT, "evaluation", "gt", "BAR-ATH_possession_gt_public.csv")
 
 FPS = GAMES[GAME]["fps"]
