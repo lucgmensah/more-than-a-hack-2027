@@ -24,6 +24,11 @@ STATES = (H, A, D)          # state index == label code
 N_STATES = 3
 
 
+def _is_team_ball_channel(name):
+    """Channels shaped (team x distance bucket x margin) + 'ball missing': nearest, nearest_interp, ttb."""
+    return name.startswith(("nearest", "ttb"))
+
+
 def _initial_tables(n_symbols):
     """Domain-anchored starting tables, one (3, n_symbols) matrix per channel.
 
@@ -34,23 +39,28 @@ def _initial_tables(n_symbols):
     tables = {}
     for name, size in n_symbols.items():
         base = np.ones((N_STATES, size))
-        if name == "nearest":
-            for symbol in range(12):
-                team, dist_bucket = symbol // 6, (symbol % 6) // 2
+        if name == "count_diff":
+            for symbol in range(5):
+                base[H, symbol] += max(0, symbol - 2)
+                base[A, symbol] += max(0, 2 - symbol)
+        elif _is_team_ball_channel(name):
+            per_team = (size - 1) // 2
+            for symbol in range(size - 1):
+                team, dist_bucket = symbol // per_team, (symbol % per_team) // 2
                 closeness = 1.0 / (1 + dist_bucket)
                 base[H if team == 0 else A, symbol] += 2.0 * closeness
                 base[D, symbol] += 0.5 * closeness
-            base[D, 12] += 2.0
-            base[[H, A], 12] += 0.5
+            base[D, size - 1] += 2.0
+            base[[H, A], size - 1] += 0.5
         elif name == "ball_speed":
             base[D, 0] += 1.0
             base[D, 1] += 1.0
             base[[H, A], 2:] += 1.0
-        elif name == "set_piece":
-            base[D, 1] += 3.0
-        elif name == "phase_team":
-            base[H, 1] += 1.0
-            base[A, 2] += 1.0
+        elif name.startswith("set_piece"):
+            base[D, 1::2] += 3.0                       # symbols 1 (and 3 when crossed with visibility)
+        elif name.startswith("phase_team"):
+            base[H, 1::3] += 1.0
+            base[A, 2::3] += 1.0
         elif name == "mean_speed":
             base[D, 0:2] += 1.0
             base[[H, A], 2:] += 1.0
@@ -84,10 +94,14 @@ def initial_transitions(possession_s=MEAN_POSSESSION_S, alive_s=MEAN_ALIVE_BEFOR
 def _mirror(name, size):
     """Symbol permutation that swaps home and away for a channel (identity if it has no team)."""
     perm = np.arange(size)
-    if name == "nearest":
-        perm[:12] = (np.arange(12) + 6) % 12
-    elif name == "phase_team":
-        perm[1], perm[2] = 2, 1
+    if _is_team_ball_channel(name):
+        half = (size - 1) // 2
+        perm[: size - 1] = (np.arange(size - 1) + half) % (size - 1)
+    elif name == "count_diff":
+        perm[:5] = 4 - np.arange(5)
+    elif name.startswith("phase_team"):
+        for k in range(size // 3):                     # swap "home phase" and "away phase" in each block
+            perm[3 * k + 1], perm[3 * k + 2] = 3 * k + 2, 3 * k + 1
     return perm
 
 
@@ -97,12 +111,18 @@ def _mirror(name, size):
 # observations well and answers the wrong question -- whether the ball is VISIBLE, not whether it
 # is DEAD. The challenge's own data say occlusion is common in live play, so a missing ball is tied
 # to be equally likely in every state: it carries no information and the other channels decide.
-MISSING_SYMBOL = {"nearest": 12, "ball_speed": 0}
+def _missing_symbol(name, size):
+    """Index of the 'ball not seen' symbol of a channel, or None if the channel has none."""
+    if name == "ball_speed":
+        return 0
+    if _is_team_ball_channel(name) or name == "count_diff":
+        return size - 1
+    return None
 
 
 def _tie_missing(table, name, counts=None):
     """Make P(missing | state) the same for every state, rescaling the other symbols to fit."""
-    sym = MISSING_SYMBOL.get(name)
+    sym = _missing_symbol(name, table.shape[1])
     if sym is None:
         return table
     weight = counts if counts is not None else table
@@ -162,13 +182,35 @@ def _forward_backward(log_em, trans, start):
     return gamma, xi, loglik
 
 
+def _blocks(T, block):
+    """Start index and length of each block of `block` frames covering T frames."""
+    starts = np.arange(0, T, block)
+    lengths = np.minimum(block, T - starts)
+    return starts, lengths
+
+
+def _block_log_em(log_em, block):
+    """Sum the (already tempered) frame log-likelihoods inside blocks. block=1 is the identity.
+
+    A block is one HMM step. With block=5 (0.2 s) the forward-backward and Viterbi loops run 5x
+    fewer steps, which is what makes grids of experiments affordable; the state can only change at
+    block boundaries, a 0.2 s resolution that is far below the metric's tolerance.
+    """
+    if block == 1:
+        return log_em, None
+    starts, lengths = _blocks(log_em.shape[0], block)
+    return np.add.reduceat(log_em, starts, axis=0), lengths
+
+
 def fit(symbols_by_run, names, n_symbols, alpha=0.25, iterations=15, verbose=True,
-        learn_transitions=False, possession_s=MEAN_POSSESSION_S):
+        learn_transitions=False, possession_s=MEAN_POSSESSION_S, block=1):
     """EM on one or several independent runs (the two halves). Returns (tables, trans).
 
     Emission tables are learned (H/A tied by mirror symmetry). Transitions stay at the declared
-    dwell-time prior unless learn_transitions is set.
+    dwell-time prior unless learn_transitions is set (not supported together with block > 1).
     """
+    if learn_transitions and block != 1:
+        raise ValueError("learn_transitions needs block=1")
     tables = {n: _tie_missing(t, n) for n, t in _initial_tables(
         {n: n_symbols[n] for n in names}).items()}
     trans = initial_transitions(possession_s=possession_s)
@@ -179,9 +221,12 @@ def fit(symbols_by_run, names, n_symbols, alpha=0.25, iterations=15, verbose=Tru
         counts = {n: np.full((N_STATES, n_symbols[n]), 1.0) for n in names}   # Dirichlet(1) smoothing
         xi_total = np.full((N_STATES, N_STATES), 1e-3)
         total = 0.0
+        trans_step = np.linalg.matrix_power(trans, block) if block > 1 else trans
         for symbols in symbols_by_run:
-            gamma, xi, loglik = _forward_backward(
-                _log_emission(symbols, tables, names, alpha), trans, start)
+            log_em, lengths = _block_log_em(_log_emission(symbols, tables, names, alpha), block)
+            gamma, xi, loglik = _forward_backward(log_em, trans_step, start)
+            if lengths is not None:
+                gamma = np.repeat(gamma, lengths, axis=0)      # every frame inherits its block's posterior
             xi_total += xi
             total += loglik
             for column, name in enumerate(names):
@@ -200,26 +245,66 @@ def fit(symbols_by_run, names, n_symbols, alpha=0.25, iterations=15, verbose=Tru
     return tables, trans
 
 
-def viterbi(symbols, tables, trans, names, alpha=0.25):
-    """Most probable state sequence for one run, as label codes (0=H, 1=A, 2=D)."""
-    log_em = _log_emission(symbols, tables, names, alpha)
+def _with_minimum_dwell(log_em, log_trans, m):
+    """Expand each state into a chain of m sub-states so no stay can be shorter than m steps.
+
+    Sub-state i of state s moves to sub-state i+1 with probability 1; the last one either stays
+    (the original self-transition) or leaves to the FIRST sub-state of another state (the original
+    switch probabilities). The first m-1 steps of any stay are therefore forced, which is the
+    simplest explicit-duration model: a minimum length, then the usual geometric tail.
+    """
+    n = N_STATES * m
+    big_trans = np.full((n, n), -np.inf)
+    for s in range(N_STATES):
+        for i in range(m - 1):
+            big_trans[s * m + i, s * m + i + 1] = 0.0
+        last = s * m + m - 1
+        big_trans[last, last] = log_trans[s, s]
+        for other in range(N_STATES):
+            if other != s:
+                big_trans[last, other * m] = log_trans[s, other]
+    return np.repeat(log_em, m, axis=1), big_trans
+
+
+def viterbi(symbols, tables, trans, names, alpha=0.25, block=1, min_dwell_s=0.0):
+    """Most probable state sequence for one run, as label codes (0=H, 1=A, 2=D).
+
+    min_dwell_s > 0 forbids any stay shorter than that (rounded to whole blocks), i.e. no
+    possession and no stoppage shorter than min_dwell_s can appear in the output.
+    """
+    n_frames = symbols.shape[0]
+    log_em, lengths = _block_log_em(_log_emission(symbols, tables, names, alpha), block)
+    trans = np.linalg.matrix_power(trans, block) if block > 1 else trans
     log_trans = np.log(trans + 1e-12)
+    m = max(1, int(round(min_dwell_s * FPS / block))) if min_dwell_s > 0 else 1
+    if m > 1:
+        log_em, log_trans = _with_minimum_dwell(log_em, log_trans, m)
+        first = np.full(N_STATES * m, -np.inf)
+        first[D * m] = 0.0
+        first_prior = first
+    else:
+        first_prior = np.log(np.array([1e-3, 1e-3, 1.0]))
+    n_states = log_em.shape[1]
     T = log_em.shape[0]
-    delta = np.log(np.array([1e-3, 1e-3, 1.0])) + log_em[0]
-    back = np.empty((T, N_STATES), dtype=np.int8)
+    delta = first_prior + log_em[0]
+    back = np.empty((T, n_states), dtype=np.int16)
     for t in range(1, T):
         scores = delta[:, None] + log_trans
         back[t] = scores.argmax(axis=0)
         delta = scores.max(axis=0) + log_em[t]
-    path = np.empty(T, dtype=np.int8)
+    path = np.empty(T, dtype=np.int16)
     path[-1] = delta.argmax()
     for t in range(T - 1, 0, -1):
         path[t - 1] = back[t, path[t]]
+    path = (path // m).astype(np.int8)          # sub-state -> state (a no-op when m == 1)
+    if lengths is not None:
+        path = np.repeat(path, lengths)[:n_frames]
     return path
 
 
 def decode_match(channels, runs, names, n_symbols, alpha=0.25, iterations=15, verbose=True,
-                 learn_transitions=False, possession_s=MEAN_POSSESSION_S):
+                 learn_transitions=False, possession_s=MEAN_POSSESSION_S, block=1,
+                 min_dwell_s=0.0):
     """Fit on the graded halves, decode each. Returns (codes over all frames, tables, trans).
 
     Ungraded frames get X: they are never scored, and the halves are decoded independently so the
@@ -227,8 +312,8 @@ def decode_match(channels, runs, names, n_symbols, alpha=0.25, iterations=15, ve
     """
     symbols_by_run = [channels[start:stop] for start, stop in runs]
     tables, trans = fit(symbols_by_run, names, n_symbols, alpha, iterations, verbose,
-                        learn_transitions, possession_s)
+                        learn_transitions, possession_s, block)
     codes = np.full(channels.shape[0], 3, dtype=np.int8)
     for (start, stop), symbols in zip(runs, symbols_by_run):
-        codes[start:stop] = viterbi(symbols, tables, trans, names, alpha)
+        codes[start:stop] = viterbi(symbols, tables, trans, names, alpha, block, min_dwell_s)
     return codes, tables, trans

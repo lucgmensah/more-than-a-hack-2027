@@ -23,10 +23,16 @@ import numpy as np
 
 from common import FPS, H, A, N_SLOTS, smart_tags, tag_team
 
-# Symbol counts per channel (including the 'missing' symbol where there is one).
-N_SYMBOLS = {"nearest": 13, "ball_speed": 5, "set_piece": 2, "phase_team": 3, "mean_speed": 5}
+CLOSE_EDGES = (1.0, 2.0, 4.0, 8.0)   # m: player-ball distance buckets. On clean Metrica tracking the
+                                      # nearest player is right 97% of the time within 1 m, 68% at
+                                      # 1-2 m and about 55-60% beyond 2 m (measured against the proxy GT)
+_NEAREST_SYMBOLS = 2 * (len(CLOSE_EDGES) + 1) * 2 + 1   # team x distance bucket x margin, + missing
 
-CLOSE_EDGES = (1.5, 3.0)       # m: player-ball distance buckets (about arm's reach / a stride / far)
+# Symbol counts per channel (including the 'missing' symbol where there is one).
+N_SYMBOLS = {"nearest": _NEAREST_SYMBOLS, "nearest_interp": _NEAREST_SYMBOLS, "ball_speed": 5,
+             "set_piece": 2, "phase_team": 3, "mean_speed": 5, "ttb": 13, "count_diff": 6,
+             "set_piece@vis": 4, "phase_team@vis": 6}
+
 MARGIN_EDGE = 1.0              # m: how much closer the nearest player is than the nearest opponent
 BALL_SPEED_EDGES = (1.0, 4.0, 10.0)   # m/s
 MEAN_SPEED_EDGES = (0.7, 1.5, 2.5, 3.5)  # m/s, mean over tracked players (walking ... sprinting)
@@ -53,7 +59,7 @@ def _nearest_by_team(tracking):
 
 
 def nearest_channel(tracking):
-    """Symbols 0..11 = team(2) x distance bucket(3) x margin bucket(2); 12 = ball or players missing."""
+    """team(2) x distance bucket x margin bucket(2), then one final symbol for ball or players missing."""
     d_home, d_away = _nearest_by_team(tracking)
     missing = np.isnan(d_home) | np.isnan(d_away)
     d_home = np.where(missing, 0, d_home)
@@ -64,9 +70,44 @@ def nearest_channel(tracking):
     margin = np.abs(d_home - d_away)
     dist_bucket = np.digitize(nearest, CLOSE_EDGES)             # 0,1,2
     margin_bucket = (margin >= MARGIN_EDGE).astype(np.int64)    # 0,1
-    symbol = team * 6 + dist_bucket * 2 + margin_bucket
-    symbol[missing] = 12
+    per_team = (len(CLOSE_EDGES) + 1) * 2
+    symbol = team * per_team + dist_bucket * 2 + margin_bucket
+    symbol[missing] = 2 * per_team
     return symbol
+
+
+INTERP_MAX_GAP_S = 3.0      # s: ball gaps up to this long are bridged by linear interpolation
+
+
+def interpolated_ball(tracking, max_gap_s=INTERP_MAX_GAP_S):
+    """Ball positions with short gaps filled linearly between the visible ends; NaN elsewhere.
+
+    Non-causal on purpose (the whole match is known). Only frames where the ball is MISSING and
+    the surrounding gap is short get a value; visible frames stay NaN here, because they are the
+    business of the plain `nearest` channel.
+    """
+    ball = tracking["ball"][:, :2]
+    seen = np.flatnonzero(~np.isnan(ball[:, 0]))
+    out = np.full(ball.shape, np.nan, dtype=np.float32)
+    if seen.size < 2:
+        return out
+    index = np.arange(len(ball))
+    nxt = np.searchsorted(seen, index, side="left")
+    ok = (nxt > 0) & (nxt < seen.size)
+    left = seen[np.clip(nxt - 1, 0, seen.size - 1)]
+    right = seen[np.clip(nxt, 0, seen.size - 1)]
+    fill = ok & np.isnan(ball[:, 0]) & ((right - left) <= max_gap_s * FPS)
+    for axis in (0, 1):
+        out[fill, axis] = np.interp(index[fill], seen, ball[seen, axis])
+    return out
+
+
+def nearest_interp_channel(tracking):
+    """`nearest` evaluated on the interpolated ball; 'missing' wherever the ball is seen or the gap is long."""
+    bridged = dict(tracking)
+    bridged["ball"] = np.concatenate(
+        [interpolated_ball(tracking), np.full((len(tracking["ball"]), 1), np.nan, np.float32)], axis=1)
+    return nearest_channel(bridged)
 
 
 def nearest_team_codes(tracking):
@@ -232,15 +273,88 @@ def phase_team_channel(tracking, events=None, trust=0.6):
     return symbol
 
 
+# -- control-aware channels (who can actually get to the ball, who is around it) -----------------------
+
+REACTION_S = 0.3            # s: a player keeps his current velocity this long before reacting
+MAX_SPEED = 5.0             # m/s: sprint speed used for the arrival-time estimate
+TTB_EDGES = (0.5, 1.2)      # s: arrival time buckets
+TTB_MARGIN_S = 0.3          # s: margin between the two teams' fastest arrival
+ZONE_RADIUS = 5.0           # m: players this close to the ball take part in the duel
+
+
+def player_velocity(tracking, half_window=SPEED_HALF_WINDOW):
+    """(N, P, 2) velocity in m/s from positions over +/- half_window frames, NaN where unknown."""
+    key = "_vel_{}".format(half_window)
+    if key not in tracking:
+        pos = tracking["players"][..., :2]
+        vel = np.full(pos.shape, np.nan, dtype=np.float32)
+        k = half_window
+        vel[k:-k] = (pos[2 * k:] - pos[: -2 * k]) / (2.0 * k / FPS)
+        tracking[key] = vel
+    return tracking[key]
+
+
+def _team_min(values, team, which):
+    big = np.float32(1e9)
+    sub = values[:, team == which]
+    out = np.where(np.isnan(sub), big, sub).min(axis=1)
+    out[out >= big] = np.nan
+    return out
+
+
+def ttb_channel(tracking):
+    """Like `nearest`, but ranks players by estimated time to reach the ball, not by distance.
+
+    A defender running away from the ball is farther in time than his distance suggests, and a
+    player sprinting towards it is closer: the simplest physical version of Spearman's pitch
+    control. Players with an unknown velocity are assumed to stand still.
+    """
+    players, ball, team = tracking["players"], tracking["ball"], tracking["team"]
+    vel = np.nan_to_num(player_velocity(tracking), nan=0.0)
+    future = players[..., :2] + vel * REACTION_S
+    delta = future - ball[:, None, :2]
+    arrival = REACTION_S + np.sqrt(np.einsum("nsc,nsc->ns", delta, delta)) / MAX_SPEED
+    arrival = np.where(np.isnan(players[..., 0]), np.nan, arrival)
+    t_home, t_away = _team_min(arrival, team, 0), _team_min(arrival, team, 1)
+    missing = np.isnan(t_home) | np.isnan(t_away) | np.isnan(ball[:, 0])
+    t_home, t_away = np.where(missing, 0, t_home), np.where(missing, 0, t_away)
+    side = (t_away < t_home).astype(np.int64)
+    best = np.minimum(t_home, t_away)
+    margin = (np.abs(t_home - t_away) >= TTB_MARGIN_S).astype(np.int64)
+    symbol = side * 6 + np.digitize(best, TTB_EDGES) * 2 + margin
+    symbol[missing] = 12
+    return symbol
+
+
+def count_diff_channel(tracking):
+    """Home minus away players within ZONE_RADIUS of the ball, clipped to [-2, 2] -> symbols 0..4; 5 = ball missing."""
+    players, ball, team = tracking["players"], tracking["ball"], tracking["team"]
+    delta = players[..., :2] - ball[:, None, :2]
+    near = np.sqrt(np.einsum("nsc,nsc->ns", delta, delta)) <= ZONE_RADIUS   # NaN compares False
+    diff = near[:, team == 0].sum(axis=1) - near[:, team == 1].sum(axis=1)
+    symbol = np.clip(diff, -2, 2) + 2
+    symbol[np.isnan(ball[:, 0])] = 5
+    return symbol.astype(np.int64)
+
+
 def build_channels(tracking, names, events=None):
     """(N, len(names)) int symbol matrix for the requested channels, in the given order."""
     # `events` stays None for matches without Smart Tagging; only the two tag channels read it, and
     # they load the BAR-ATH tagging themselves when asked for with events=None.
+    visible = (~np.isnan(tracking["ball"][:, 0])).astype(np.int64)
     builders = {
         "nearest": lambda: nearest_channel(tracking),
         "ball_speed": lambda: ball_speed_channel(tracking),
         "set_piece": lambda: set_piece_channel(tracking, events),
         "phase_team": lambda: phase_team_channel(tracking, events),
         "mean_speed": lambda: mean_speed_channel(tracking),
+        "nearest_interp": lambda: nearest_interp_channel(tracking),
+        # "@vis": the same channel crossed with "is the ball visible", so EM can learn that a tag
+        # deserves more trust when the tracking has no ball than when it does.
+        "set_piece@vis": lambda: set_piece_channel(tracking, events) + 2 * visible,
+        "phase_team@prior": lambda: phase_team_channel(tracking, events),   # D row tied in hmm.py
+        "phase_team@vis": lambda: phase_team_channel(tracking, events) + 3 * visible,
+        "ttb": lambda: ttb_channel(tracking),
+        "count_diff": lambda: count_diff_channel(tracking),
     }
     return np.stack([builders[name]() for name in names], axis=1)

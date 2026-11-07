@@ -7,6 +7,10 @@ library and nothing else.
 |---|---|---|
 | [exp01_hmm_unsupervised](exp01_hmm_unsupervised/README.md) | Does decoding possession with an HMM (EM without labels, Viterbi) beat the windowed vote on BAR-ATH? | `data/tactical/` |
 | [exp02_metrica_validation](exp02_metrica_validation/README.md) | Do the methods hold up on games with hundreds of possessions, once their tracking is damaged to look like BAR-ATH? | Metrica sample games (downloaded by the script) and the BAR-ATH tracking |
+| [exp03_improve](exp03_improve/README.md) | Which channels, alpha and minimum possession length help, measured on six damaged Metrica copies? | as exp02 |
+| [exp04_bar_ath_final](exp04_bar_ath_final/README.md) | The Metrica-chosen configuration, once on BAR-ATH, with and without Smart Tagging; writes validated submissions | `data/tactical/` |
+| [exp05_masked_ball](exp05_masked_ball/README.md) | With the ball erased where a player clearly has it, does Smart Tagging recover the team? | `data/tactical/` |
+| [exp06_abstain](exp06_abstain/README.md) | Does emitting X (forward-filled by spellF1) instead of guessing help? No: -0.04 to -0.05 | as exp02 |
 | [lib](lib) | shared code: tracking loader and scoring (`common.py`), evidence channels (`features.py`), HMM (`hmm.py`) | numpy, pandas |
 
 Conventions

@@ -33,6 +33,7 @@ import features  # noqa: E402
 import ground_truth  # noqa: E402
 import hmm  # noqa: E402
 import metrica_io  # noqa: E402
+from methods import hmm_codes as _hmm_codes, period_runs, score, vote_baseline  # noqa: E402,F401
 
 pm = common.pm
 OUT = os.path.join(common.OUT_DIR, "exp02")
@@ -44,45 +45,6 @@ CHANNEL_SETS = {
 ALPHAS = (0.1, 0.25, 0.5)
 POSSESSION_S = (15.0, 30.0)   # declared dwell prior: mean seconds a team keeps the ball
 WINDOWS = (0, 25, 50, 125)
-
-
-def vote_baseline(tracking, window, periods):
-    """The repository baseline (nearest player + centred majority vote), per period."""
-    nearest = features.nearest_team_codes(tracking)
-    out = np.full(len(nearest), common.D, dtype=np.int8)
-    for period in np.unique(periods):
-        sel = np.flatnonzero(periods == period)
-        codes = nearest[sel]
-        n = len(codes)
-        if window <= 0:
-            res = np.where(codes == 0, common.H, np.where(codes == 1, common.A, common.D))
-        else:
-            home = np.concatenate(([0], np.cumsum(codes == 0)))
-            away = np.concatenate(([0], np.cumsum(codes == 1)))
-            idx = np.arange(n)
-            lo, hi = np.maximum(0, idx - window), np.minimum(n, idx + window + 1)
-            h, a = home[hi] - home[lo], away[hi] - away[lo]
-            res = np.full(n, common.D, dtype=np.int8)
-            seen = (h + a) > 0
-            res[seen] = np.where(h[seen] >= a[seen], common.H, common.A)
-        out[sel] = res
-    return out
-
-
-def hmm_codes(tracking, names, alpha, possession_s, periods, iterations):
-    runs = [(int(np.flatnonzero(periods == p)[0]), int(np.flatnonzero(periods == p)[-1]) + 1)
-            for p in np.unique(periods)]
-    channels = features.build_channels(tracking, names, events=None)
-    codes, _, _ = hmm.decode_match(channels, runs, names, features.N_SYMBOLS, alpha=alpha,
-                                   iterations=iterations, verbose=False,
-                                   possession_s=possession_s)
-    return codes
-
-
-def score(gt, pred, bootstrap):
-    pred = np.array(pred, dtype=np.int8)
-    pred[gt == common.X] = common.X
-    return pm.evaluate(gt, pred, bootstrap_n=bootstrap)
 
 
 def record(game, condition, method, param, result):
@@ -134,8 +96,9 @@ def main():
             for set_name, names in sets.items():
                 for alpha in alphas:
                     for possession_s in dwell:
-                        res = score(gt, hmm_codes(tracking, names, alpha, possession_s, periods,
-                                                  args.iterations), args.bootstrap)
+                        res = score(gt, _hmm_codes(tracking, names, alpha, possession_s,
+                                                   period_runs(periods), args.iterations),
+                                    args.bootstrap)
                         param = "a={},p={:g}".format(alpha, possession_s)
                         rows.append(record(game, condition, "hmm:" + set_name, param, res))
                         print("   {:<9} hmm {:<32} {:<12} spellF1 {:.3f} macroF1 {:.3f} poss {:>4} (gt {})"

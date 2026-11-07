@@ -19,6 +19,8 @@ import numpy as np
 PLAYER_ABSENT_SHARE = 0.07
 PLAYER_ABSENT_MEAN_S = 2.0
 PLAYER_NOISE_M = 0.25
+TARGET_MISSING = 0.41
+MISSING_TOLERANCE = 0.03
 BALL_NOISE_M = 0.5
 FPS = 25
 
@@ -89,7 +91,11 @@ def degrade(tracking, vis_runs, gap_runs, seed=0):
     out["ball"][:, :2] += rng.normal(0.0, BALL_NOISE_M, size=out["ball"][:, :2].shape)
 
     out["players"][player_absence_mask(n, n_players, rng)] = np.nan
-    out["ball"][~ball_visibility_mask(n, vis_runs, gap_runs, rng)] = np.nan
+    for _ in range(200):      # redraw until the missing share is close to BAR-ATH's 41% (heavy tails)
+        visible = ball_visibility_mask(n, vis_runs, gap_runs, rng)
+        if abs((~visible).mean() - TARGET_MISSING) <= MISSING_TOLERANCE:
+            break
+    out["ball"][~visible] = np.nan
 
     periods = out["period"]
     for period in np.unique(periods):
