@@ -309,6 +309,75 @@ def viterbi(symbols, tables, trans, names, alpha=0.25, block=1, min_dwell_s=0.0)
     return path
 
 
+def semi_viterbi(symbols, tables, trans, names, alpha=0.25, block=5, mean_s=(15.0, 15.0, 12.0),
+                 shape=2.0, min_s=3.0, max_s=90.0):
+    """Explicit-duration decoding: each stay has a gamma-shaped duration (mean `mean_s` per state,
+    zero below `min_s`), instead of the geometric one implied by a Markov self-transition.
+
+    Which state follows is taken from the off-diagonal of the declared transition matrix.
+    Emissions are the HMM's (tempered, summed over blocks). Returns label codes per frame.
+    """
+    n_frames = symbols.shape[0]
+    log_em, lengths = _block_log_em(_log_emission(symbols, tables, names, alpha), block)
+    T = log_em.shape[0]
+    cum = np.vstack([np.zeros((1, N_STATES)), np.cumsum(log_em, axis=0)])
+    off = np.array(trans, dtype=float)
+    np.fill_diagonal(off, 0.0)
+    log_switch = np.log(off / off.sum(axis=1, keepdims=True) + 1e-12)
+    np.fill_diagonal(log_switch, -np.inf)
+
+    dmax = int(max_s * FPS / block)
+    dmin = max(1, int(round(min_s * FPS / block)))
+    x = np.arange(1, dmax + 1) * block / FPS
+    log_dur = np.full((N_STATES, dmax), -np.inf)
+    for st in range(N_STATES):
+        logpdf = (shape - 1.0) * np.log(x) - x * shape / mean_s[st]
+        logpdf[:dmin - 1] = -np.inf
+        log_dur[st] = logpdf - np.log(np.exp(logpdf).sum())
+
+    V = np.full((T + 1, N_STATES), -np.inf)        # best score of a path whose last segment ends at t
+    B = np.full((T + 1, N_STATES), -np.inf)        # best score of starting a segment of state s at t
+    Bprev = np.zeros((T + 1, N_STATES), dtype=np.int8)
+    best_d = np.zeros((T + 1, N_STATES), dtype=np.int32)
+    B[0] = np.log(np.array([1e-3, 1e-3, 1.0]))
+    Bprev[0] = -1
+    for t in range(1, T + 1):
+        for st in range(N_STATES):
+            d = np.arange(dmin, min(dmax, t) + 1)
+            if len(d) == 0:
+                continue
+            cand = B[t - d, st] - cum[t - d, st] + log_dur[st, d - 1]
+            k = int(cand.argmax())
+            V[t, st] = cum[t, st] + cand[k]
+            best_d[t, st] = d[k]
+        # starting a segment of state s at t follows the best segment of another state ending at t
+        sc = V[t][:, None] + log_switch
+        B[t] = sc.max(axis=0)
+        Bprev[t] = sc.argmax(axis=0)
+    path = np.empty(T, dtype=np.int8)
+    t, st = T, int(V[T].argmax())
+    while t > 0:
+        d = int(best_d[t, st])
+        path[t - d:t] = st
+        t, st = t - d, int(Bprev[t - d, st])
+    if lengths is not None:
+        path = np.repeat(path, lengths)[:n_frames]
+    return path
+
+
+def confidence(symbols, tables, trans, names, alpha=0.25, block=1, start=None):
+    """Per-frame smoothed posterior of the most likely state (no minimum dwell): how sure the model is."""
+    n_frames = symbols.shape[0]
+    log_em, lengths = _block_log_em(_log_emission(symbols, tables, names, alpha), block)
+    trans = np.linalg.matrix_power(trans, block) if block > 1 else trans
+    start = np.array([1e-3, 1e-3, 1.0]) if start is None else start
+    gamma, _, _ = _forward_backward(log_em, trans, start / start.sum())
+    conf = gamma.max(axis=1)
+    if lengths is not None:
+        conf = np.repeat(conf, lengths)[:n_frames]
+    return conf
+
+
 def decode_match(channels, runs, names, n_symbols, alpha=0.25, iterations=15, verbose=True,
                  learn_transitions=False, possession_s=MEAN_POSSESSION_S, block=1,
                  min_dwell_s=0.0):

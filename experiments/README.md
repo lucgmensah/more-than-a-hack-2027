@@ -10,7 +10,7 @@ library and nothing else.
 | [exp03_improve](exp03_improve/README.md) | Which channels, alpha and minimum possession length help, measured on six damaged Metrica copies? | as exp02 |
 | [exp04_bar_ath_final](exp04_bar_ath_final/README.md) | The Metrica-chosen configuration, once on BAR-ATH, with and without Smart Tagging; writes validated submissions | `data/tactical/` |
 | [exp05_masked_ball](exp05_masked_ball/README.md) | With the ball erased where a player clearly has it, does Smart Tagging recover the team? | `data/tactical/` |
-| [exp06_abstain](exp06_abstain/README.md) | Does emitting X (forward-filled by spellF1) instead of guessing help? No: -0.04 to -0.05 | as exp02 |
+| [exp06_abstain](exp06_abstain/README.md) | X (abstain) instead of guessing: no (-0.04 to -0.05, flat by confidence); semi-Markov decoder: +0.01, noise | as exp02 |
 | [lib](lib) | shared code: tracking loader and scoring (`common.py`), evidence channels (`features.py`), HMM (`hmm.py`) | numpy, pandas |
 
 Conventions
