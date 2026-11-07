@@ -31,7 +31,7 @@ _NEAREST_SYMBOLS = 2 * (len(CLOSE_EDGES) + 1) * 2 + 1   # team x distance bucket
 # Symbol counts per channel (including the 'missing' symbol where there is one).
 N_SYMBOLS = {"nearest": _NEAREST_SYMBOLS, "nearest_interp": _NEAREST_SYMBOLS, "ball_speed": 5,
              "set_piece": 2, "phase_team": 3, "mean_speed": 5, "ttb": 13, "count_diff": 6,
-             "set_piece@vis": 4, "phase_team@vis": 6}
+             "set_piece@vis": 4, "phase_team@vis": 6, "phase_team@prior": 3}
 
 MARGIN_EDGE = 1.0              # m: how much closer the nearest player is than the nearest opponent
 BALL_SPEED_EDGES = (1.0, 4.0, 10.0)   # m/s

@@ -133,6 +133,13 @@ def _tie_missing(table, name, counts=None):
     return table
 
 
+def _tie_prior_only(table, name, counts):
+    """Channels named '...@prior' tell H from A but say nothing about dead ball: D gets the marginal."""
+    if name.endswith("@prior"):
+        table[D] = counts.sum(axis=0) / counts.sum()
+    return table
+
+
 def _symmetrise(table, name):
     """Force P(symbol | A) to be the mirror image of P(symbol | H).
 
@@ -235,9 +242,9 @@ def fit(symbols_by_run, names, n_symbols, alpha=0.25, iterations=15, verbose=Tru
                         symbols[:, column], weights=gamma[:, state], minlength=n_symbols[name])
         if learn_transitions:
             trans = xi_total / xi_total.sum(axis=1, keepdims=True)
-        tables = {n: _tie_missing(
-            _symmetrise(counts[n] / counts[n].sum(axis=1, keepdims=True), n), n, counts[n])
-            for n in names}
+        tables = {n: _tie_prior_only(_tie_missing(
+            _symmetrise(counts[n] / counts[n].sum(axis=1, keepdims=True), n), n, counts[n]),
+            n, counts[n]) for n in names}
         if verbose:
             print("    EM {:>2}/{}  loglik {:.0f}  mean stay: H {:.1f}s A {:.1f}s D {:.1f}s".format(
                 step + 1, iterations, total,
