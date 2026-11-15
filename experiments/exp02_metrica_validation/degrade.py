@@ -102,3 +102,57 @@ def degrade(tracking, vis_runs, gap_runs, seed=0):
         sel = np.flatnonzero(periods == period)
         out["players"][sel, :, 2] = displacement_speed(out["players"][sel, :, :2])
     return out
+
+
+# -- faithful variant (exp08) -----------------------------------------------------------------------
+#
+# Measured on the tracking only (experiments/exp08_friend_learned/README.md): clean Metrica already
+# looks like BAR-ATH. Player speeds have the same distribution (10% of frames with a mean below
+# 0.7 m/s in both), the ball is missing on 39-41% of frames against 40.7%, and BAR-ATH positions are
+# smoother than Metrica's (median second difference 0.001 m). `degrade` above adds 0.25 m / 0.5 m of
+# noise before recomputing speeds and adds BAR-ATH gaps on top of Metrica's own: far too harsh.
+# This variant keeps Metrica's positions, speeds and ball gaps, drops players as BAR-ATH does
+# (20.5 tracked of 22), and only adds short open-play ball losses where BAR-ATH loses the ball more
+# often than Metrica at the same player speed.
+
+MEAN_SPEED_EDGES = (0.7, 1.5, 2.5, 3.5)   # m/s, mean over tracked players (as features.py)
+INPLAY_GAP_MEAN_S = 1.0                   # declared: a lost ball in open play is found again in ~1 s
+
+
+def speed_bucket(tracking):
+    """Bucket 0..4 of the mean tracked-player speed on every frame (4 when no player is tracked)."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        mean_speed = np.nanmean(tracking["players"][..., 2], axis=1)
+    return np.digitize(np.nan_to_num(mean_speed, nan=99.0), MEAN_SPEED_EDGES)
+
+
+def missing_by_speed(tracking, mask=None):
+    """Share of frames with the ball missing in each speed bucket (5 values)."""
+    bucket = speed_bucket(tracking)
+    missing = np.isnan(tracking["ball"][:, 0])
+    if mask is not None:
+        bucket, missing = bucket[mask], missing[mask]
+    return np.array([missing[bucket == b].mean() if (bucket == b).any() else 0.0
+                     for b in range(len(MEAN_SPEED_EDGES) + 1)])
+
+
+def degrade_faithful(tracking, bar_missing, seed=0):
+    """Player drop-outs + extra open-play ball losses so the ball is missing as often as in BAR-ATH
+    at each player-speed bucket (`bar_missing` = missing_by_speed of BAR-ATH's graded frames)."""
+    rng = np.random.default_rng(seed)
+    out = {k: (v.copy() if isinstance(v, np.ndarray) else v)
+           for k, v in tracking.items() if not k.startswith("_")}
+    n, n_players = out["players"].shape[:2]
+
+    bucket = speed_bucket(tracking)
+    extra = np.clip((bar_missing - missing_by_speed(tracking)) / (1.0 - missing_by_speed(tracking)), 0, 1)
+    mean_len = INPLAY_GAP_MEAN_S * FPS
+    visible = ~np.isnan(out["ball"][:, 0])
+    starts = np.flatnonzero(visible & (rng.random(n) < extra[bucket] / mean_len))
+    for start in starts:
+        out["ball"][start: start + max(1, int(rng.exponential(mean_len)))] = np.nan
+
+    out["players"][player_absence_mask(n, n_players, rng)] = np.nan
+    return out
