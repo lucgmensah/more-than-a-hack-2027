@@ -13,6 +13,7 @@ library and nothing else.
 | [exp06_abstain](exp06_abstain/README.md) | X (abstain) instead of guessing: no (-0.04 to -0.05, flat by confidence); semi-Markov decoder: +0.01, noise | as exp02 |
 | [exp07_friend_port](exp07_friend_port/README.md) | A teammate's penalty Viterbi and adaptive smoothing, re-tuned on Metrica instead of the public window: +0.10 over the baseline, 0.035 below our HMM | as exp02 |
 | [exp08_friend_learned](exp08_friend_learned/README.md) | The teammate's exact model (ported from his code) with weights learned by logistic regression on Metrica: 0.55 spellF1 across games vs 0.45 for our HMM and 0.35 for his public-window config; public window reverses the order (0.39 vs 0.35 vs 0.52, 17 possessions). Also fixes the Metrica damage (exp02-07 were far too harsh) | faithful damage (degrade_faithful) |
+| [exp09_supervised](exp09_supervised/README.md) | **Current submission.** Boosted trees with touch and context features, trained on 7 DFL matches (official tracking with possession on every frame) damaged to look like BAR-ATH, dead ball decided from the players, broadcast ball as a second sensor. Validation without BAR-ATH: 0.65-0.70 spellF1, 0.88-0.90 macroF1 (exp08: 0.55) | DFL open data (downloaded by the script), `lightgbm` |
 | [lib](lib) | shared code: tracking loader and scoring (`common.py`), evidence channels (`features.py`), HMM (`hmm.py`) | numpy, pandas |
 
 Conventions

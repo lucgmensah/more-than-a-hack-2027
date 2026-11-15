@@ -1,0 +1,2 @@
+# Extra dependency of experiments/exp09_supervised (the rest of the repository needs numpy and pandas only)
+lightgbm==4.7.0
