@@ -1,0 +1,3 @@
+# model files must be byte-identical on every platform
+experiments/exp09_supervised/models/*.txt -text
+experiments/exp10_video_ball/models/* -text

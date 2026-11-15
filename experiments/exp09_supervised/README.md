@@ -134,7 +134,8 @@ like BAR-ATH's.
   not modelled.
 * **Remaining errors.** Possessions shorter than 5 s are found about half of the time. Turnovers
   are dated with a median error of 0.3-0.8 s.
-* **Tactical video.** Not used. No GPU on this machine, and the ball is 3-5 pixels wide in that view.
+* **Tactical video.** Not used in the submission. [exp10](../exp10_video_ball/README.md) has the code to detect
+  the ball in it (a GPU job); `predict.py --video-ball` switches it on once that has been run.
 
 ## Files
 

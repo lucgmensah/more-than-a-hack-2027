@@ -1,0 +1,4 @@
+# Extra dependencies of experiments/exp10_video_ball (optional, GPU job)
+# Install the CUDA build of torch for your machine first: https://pytorch.org/get-started/locally/
+torch>=2.5
+opencv-python-headless>=4.10
