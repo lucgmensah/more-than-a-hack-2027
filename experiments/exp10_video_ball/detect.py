@@ -53,8 +53,9 @@ def main():
     args = parser.parse_args()
     device = vb.pick_device(args.device)
     use_amp = device.type == "cuda"
-    if use_amp:
-        torch.backends.cudnn.benchmark = True
+    # Same input, same output: the repository must regenerate the submission exactly (RULES.md, rule 3).
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
     net, threshold = vb.load_net(device)
     tracking = vb.common.load_tracking()
     matrices, _, valid = vb.load_homography()
