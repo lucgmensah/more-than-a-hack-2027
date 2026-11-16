@@ -1,3 +1,26 @@
+> **Our Phase 1 submission lives on this branch (`submission`).**
+>
+> * **Technical document:** [TECHNICAL_REPORT.md](TECHNICAL_REPORT.md). It covers the approach,
+>   assets, training data, possession rules, limitations and a summary of every experiment.
+> * **The whole process, step by step:** [docs/](docs/README.md), with one report per experiment
+>   (ours and our teammate's). The experiments' code stays on branch
+>   [`lucg`](https://github.com/lucgmensah/more-than-a-hack-2027/tree/lucg/experiments).
+> * **Code of the submission:** [solution/](solution/README.md). It holds only the final method:
+>   gradient-boosted trees trained on official tracking of 7 other matches (DFL open data), damaged
+>   to look like the BAR-ATH tracking, then a penalty Viterbi.
+> * **Validation, without any BAR-ATH label:** spellF1 0.70 on Metrica and 0.65-0.66 on held-out
+>   DFL matches. On the public window, used as a check only: 0.671 spellF1, 0.839 macroF1.
+> * **Regenerate the submitted file** (about 1 minute, CPU, identical file):
+>
+>   ```bash
+>   pip install -r requirements-submission.txt
+>   python solution/predict.py          # -> solution/out/submission.csv
+>   ```
+>
+> Everything below this box is the challenge's own README, unchanged.
+
+---
+
 # More than a Hack 2027 — Phase 1: Ball Possession
 
 **Organised by [Metrica Sports](https://metrica-sports.com), [FC Barcelona](https://www.fcbarcelona.com)
