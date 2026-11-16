@@ -1,0 +1,11 @@
+# Exact environment that produced the submitted file (Python 3.13.0, Windows 11, CPU only).
+#   pip install -r requirements-submission.txt
+#   python solution/predict.py
+# The two models are committed, so nothing is fitted and no GPU or internet is needed.
+numpy==2.5.4
+pandas==3.1.1
+python-dateutil==4.0.0
+tzdata==2026.6
+narwhals==2.28.0
+lightgbm==4.7.0
+scipy==1.18.1
