@@ -1,0 +1,2 @@
+# model files must be byte-identical on every platform
+solution/models/*.txt -text
