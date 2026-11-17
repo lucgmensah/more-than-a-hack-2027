@@ -253,10 +253,7 @@ We predict slightly too few possessions: 251-270 against 281-339. The possession
 The whole process is told step by step in [docs/README.md](docs/README.md), with one report per
 experiment in [docs/experiments/](docs/experiments). This section is the summary.
 
-Two lines of work ran in parallel and then merged.
 
-* **Our teammate** explored the data and the public window heuristically (repository [Romuald-Yapo/barca-hackaton](https://github.com/Romuald-Yapo/barca-hackaton)).
-* **We** built a validation set outside BAR-ATH first, then models. The code of our experiments is on branch [`lucg`](https://github.com/lucgmensah/more-than-a-hack-2027/tree/lucg/experiments); this branch holds only the final solution.
 
 ### Teammate's exploration (scores on the public window, 17 possessions; [report](docs/experiments/teammate_exploration.md))
 
@@ -355,4 +352,3 @@ The generated files go to `solution/cache/` and `solution/out/`, which are gitig
 * Metrica Sports sample data, github.com/metrica-sports/sample-data.
 * G. Ke et al. (2017). LightGBM: a highly efficient gradient boosting decision tree. *NeurIPS*.
 * L. Xie, P. Xu, S.-F. Chang, A. Divakaran, H. Sun (2004). Structure analysis of soccer video with domain knowledge and hidden Markov models. *Pattern Recognition Letters*.
-* Teammate's repository: [Romuald-Yapo/barca-hackaton](https://github.com/Romuald-Yapo/barca-hackaton). Penalty Viterbi, feature store, video heuristics.
